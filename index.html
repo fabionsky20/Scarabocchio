@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Scarabocchio">
+<meta name="theme-color" content="#111111">
+<title>Scarabocchio</title>
+<style>
+  :root { --bg:#111; --card:#1c1c1e; --txt:#f2f2f2; --mut:#8e8e93; --acc:#ff375f; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; background:var(--bg); color:var(--txt); font-family:-apple-system,system-ui,Roboto,sans-serif; overscroll-behavior:none; }
+  body { padding: calc(env(safe-area-inset-top) + 12px) 14px calc(env(safe-area-inset-bottom) + 16px); max-width:520px; margin:auto; }
+  h1 { font-size:22px; margin:0 0 4px; } .sub { color:var(--mut); font-size:13px; margin-bottom:12px; }
+  .who { display:flex; gap:8px; margin-bottom:12px; }
+  .who button, .btn { flex:1; padding:12px; border-radius:14px; border:0; background:var(--card); color:var(--txt); font-size:15px; font-weight:600; }
+  .who button.on { background:var(--acc); }
+  canvas { width:100%; aspect-ratio:1; background:#fff; border-radius:20px; touch-action:none; display:block; }
+  .tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0; }
+  .sw { width:32px; height:32px; border-radius:50%; border:3px solid transparent; }
+  .sw.on { border-color:#fff; }
+  .size { padding:6px 10px; border-radius:10px; background:var(--card); border:0; color:var(--txt); }
+  .size.on { background:#3a3a3c; }
+  .row { display:flex; gap:8px; }
+  .send { background:var(--acc); font-size:17px; }
+  .status { text-align:center; color:var(--mut); font-size:13px; min-height:18px; margin:8px 0; }
+  .inbox { margin-top:18px; background:var(--card); border-radius:20px; padding:12px; }
+  .inbox img { width:100%; border-radius:14px; background:#fff; display:block; }
+  .inbox .t { font-size:13px; color:var(--mut); margin-bottom:8px; }
+</style>
+</head>
+<body>
+<h1>✏️ Scarabocchio</h1>
+<div class="sub">Disegna, premi Invia: arriva sul widget dell'altro.</div>
+
+<div class="who" id="who">
+  <button data-me="fabio">Sono Fabio</button>
+  <button data-me="amico">Sono l'amico</button>
+</div>
+
+<canvas id="c" width="800" height="800"></canvas>
+
+<div class="tools" id="colors"></div>
+<div class="tools">
+  <button class="size" data-s="4">fine</button>
+  <button class="size on" data-s="10">medio</button>
+  <button class="size" data-s="24">grosso</button>
+  <button class="size" data-s="eraser">gomma</button>
+</div>
+<div class="row">
+  <button class="btn" id="undo">↩︎ Annulla</button>
+  <button class="btn" id="clear">🗑 Pulisci</button>
+  <button class="btn send" id="send">Invia ➤</button>
+</div>
+<div class="status" id="status"></div>
+
+<div class="inbox">
+  <div class="t" id="inboxT">Ultimo disegno ricevuto</div>
+  <img id="inbox" alt="Nessun disegno ancora">
+</div>
+
+<script>
+const SB = "https://ywvwpbkhxuowuhqphpoq.supabase.co";
+const KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl3dndwYmtoeHVvd3VocXBocG9xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQyMTcwMDMsImV4cCI6MjEwOTc5MzAwM30.QnOGhnNRONqW1hwSx1xEgNJIiY1q7hy2PZnxk_xTDos";
+const BUCKET = "doodle";
+
+const $ = id => document.getElementById(id);
+const cv = $("c"), ctx = cv.getContext("2d");
+let me = null; try { me = localStorage.getItem("me"); } catch(e) {}
+const other = () => me === "fabio" ? "amico" : "fabio";
+
+// --- chi sono
+function setMe(v){ me = v; try{localStorage.setItem("me", v);}catch(e){}
+  document.querySelectorAll("#who button").forEach(b => b.classList.toggle("on", b.dataset.me === v));
+  $("inboxT").textContent = "Ultimo disegno ricevuto da " + (other()==="fabio"?"Fabio":"l'amico");
+  loadInbox(true);
+}
+document.querySelectorAll("#who button").forEach(b => b.onclick = () => setMe(b.dataset.me));
+
+// --- canvas
+function blank(){ ctx.fillStyle="#fff"; ctx.fillRect(0,0,cv.width,cv.height); }
+blank();
+const colors = ["#111111","#ff375f","#ff9f0a","#ffd60a","#30d158","#0a84ff","#bf5af2","#8e5a2b"];
+let color = colors[0], size = 10, eraser = false;
+colors.forEach((c,i) => { const s = document.createElement("button"); s.className = "sw" + (i?"":" on");
+  s.style.background = c; s.onclick = () => { color = c; eraser = false;
+    document.querySelectorAll(".sw").forEach(x=>x.classList.remove("on")); s.classList.add("on");
+    document.querySelectorAll(".size").forEach(x=>x.classList.toggle("on", x.dataset.s==String(size))); };
+  $("colors").appendChild(s); });
+document.querySelectorAll(".size").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".size").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  if (b.dataset.s === "eraser") eraser = true; else { eraser = false; size = +b.dataset.s; } });
+
+const history = [];
+function snap(){ history.push(ctx.getImageData(0,0,cv.width,cv.height)); if (history.length>30) history.shift(); }
+let drawing = false, last = null;
+function pos(e){ const r = cv.getBoundingClientRect(); return { x:(e.clientX-r.left)*cv.width/r.width, y:(e.clientY-r.top)*cv.height/r.height }; }
+cv.addEventListener("pointerdown", e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); snap(); drawing = true; last = pos(e); stroke(last,last); });
+cv.addEventListener("pointermove", e => { if(!drawing) return; const p = pos(e); stroke(last,p); last = p; });
+["pointerup","pointercancel","pointerleave"].forEach(t => cv.addEventListener(t, () => drawing = false));
+function stroke(a,b){ ctx.strokeStyle = eraser ? "#fff" : color; ctx.lineWidth = eraser ? 40 : size;
+  ctx.lineCap = ctx.lineJoin = "round"; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); }
+$("undo").onclick = () => { const h = history.pop(); if (h) ctx.putImageData(h,0,0); };
+$("clear").onclick = () => { snap(); blank(); };
+
+// --- invio
+$("send").onclick = async () => {
+  if (!me) { $("status").textContent = "Prima scegli chi sei ☝️"; return; }
+  $("status").textContent = "Invio…";
+  const blob = await new Promise(r => cv.toBlob(r, "image/png"));
+  try {
+    const res = await fetch(`${SB}/storage/v1/object/${BUCKET}/${other()}.png`, {
+      method:"POST",
+      headers:{ apikey:KEY, Authorization:"Bearer "+KEY, "Content-Type":"image/png", "x-upsert":"true", "cache-control":"max-age=5" },
+      body: blob });
+    if (!res.ok) throw new Error(await res.text());
+    $("status").textContent = "✅ Inviato! Ora è sul widget dell'altro";
+  } catch(err) { $("status").textContent = "❌ Errore: " + err.message.slice(0,120); }
+};
+
+// --- ricevuti (controlla ogni 5 secondi)
+let lastStamp = null;
+async function loadInbox(force){
+  if (!me) return;
+  try {
+    const url = `${SB}/storage/v1/object/public/${BUCKET}/${me}.png?t=${Date.now()}`;
+    const r = await fetch(url, { cache:"no-store" });
+    if (!r.ok) { $("inbox").removeAttribute("src"); return; }
+    const stamp = r.headers.get("last-modified") || r.headers.get("etag");
+    if (force || stamp !== lastStamp) {
+      const isNew = lastStamp && stamp !== lastStamp;
+      lastStamp = stamp;
+      $("inbox").src = URL.createObjectURL(await r.blob());
+      if (isNew) { $("status").textContent = "💌 Nuovo disegno ricevuto!"; navigator.vibrate && navigator.vibrate(150); }
+    }
+  } catch(e) {}
+}
+setInterval(loadInbox, 5000);
+if (me) setMe(me);
+</script>
+</body>
+</html>
